@@ -2,16 +2,16 @@ from win32com.client import GetObject
 
 class VolumeInfo:
     """Information about a volume."""
-    drive_letter: str
-    device_id: str
+    letter: str
+    volume_guid: str
     label: str
-    fs: str
+    filesystem: str
 
-    def __init__(self, drive_letter: str, device_id: str, label: str, fs: str) -> None:
-        self.drive_letter = drive_letter
-        self.device_id = device_id
+    def __init__(self, letter: str, volume_guid: str, label: str, filesystem: str) -> None:
+        self.letter = letter
+        self.volume_guid = volume_guid
         self.label = label
-        self.fs = fs
+        self.filesystem = filesystem
     
     pass
 
@@ -25,8 +25,8 @@ def get_volumes() -> list[VolumeInfo]:
 
     for vol in volumes:
         device_id = vol.DeviceID or ""
-        if device_id.startswith("\\\\?\\Volume{") and device_id.endswith("\\"):
-            device_id = device_id[4:-1]
+        if device_id.startswith("\\\\?\\Volume{") and device_id.endswith("}\\"):
+            device_id = device_id[10:-1]
 
         item = VolumeInfo(
             vol.DriveLetter, 
@@ -42,8 +42,8 @@ def get_volumes() -> list[VolumeInfo]:
 if __name__ == "__main__":
     items = get_volumes()
     for volumeInfo in items:
-        print(f"Буква: {volumeInfo.drive_letter}")
-        print(f"Volume GUID: {volumeInfo.device_id}")
+        print(f"Буква: {volumeInfo.letter}")
+        print(f"Volume GUID: {volumeInfo.volume_guid}")
         print(f"Метка: {volumeInfo.label}")
-        print(f"Файловая система: {volumeInfo.fs}")
+        print(f"Файловая система: {volumeInfo.filesystem}")
         print("-" * 50)
