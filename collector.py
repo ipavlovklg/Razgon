@@ -68,8 +68,7 @@ def apply_migration_v1_to_v2(cursor):
             device_guid TEXT UNIQUE NOT NULL,
             drive_letter TEXT NOT NULL,
             label TEXT,
-            filesystem TEXT,
-            last_scanned_at TIMESTAMP
+            filesystem TEXT
         );
     """)
     cursor.execute("""
