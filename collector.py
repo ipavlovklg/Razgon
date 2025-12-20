@@ -77,7 +77,7 @@ def apply_migration_v1_to_v2(cursor):
             volume_id INTEGER NOT NULL,
             relative_path TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL,
-            modified_at TIMESTAMP NOT NULL,
+            modified_at TIMESTAMP NULL,
             indexed_at TIMESTAMP,
             FOREIGN KEY (volume_id) REFERENCES volumes(id),
             UNIQUE(volume_id, relative_path)
