@@ -13,7 +13,8 @@ stop_event = False
 
 def signal_handler(signum, frame):
     global stop_event
-    print("\nStop signal received. Stopping gracefully...")
+    print("") # Перевод на новую строку перед сообщением
+    print("Stop signal received. Stopping gracefully...")
     stop_event = True
 
 def should_stop():
@@ -192,7 +193,7 @@ def insert_file_record(db_conn, dir_id: int, filename: str, stat_result):
     )
 
 # --- Recursive Scanning Logic ---
-def scan_single_volume_recursive(db_conn, volume_id: int, current_path: str, root_drive_path: str, progress_counter):
+def scan_single_volume_recursive(db_conn, volume_id: int, current_path: str, root_drive_path: str, progress_counter, current_volume_letter):
     relative_path = os.path.relpath(current_path, root_drive_path).replace("/", "\\")
     if relative_path == ".":
         relative_path = ""
@@ -203,7 +204,7 @@ def scan_single_volume_recursive(db_conn, volume_id: int, current_path: str, roo
         try:
             items = os.listdir(current_path)
         except PermissionError:
-            print(f"Permission denied: {current_path}")
+            print(f"\nPermission denied: {current_path}") # Сообщение на новой строке
             return
 
         files_in_dir = [item for item in items if os.path.isfile(os.path.join(current_path, item))]
@@ -219,27 +220,33 @@ def scan_single_volume_recursive(db_conn, volume_id: int, current_path: str, roo
                 insert_file_record(db_conn, dir_id, file_name, file_stat)
                 progress_counter['processed_files'] += 1
                 progress_counter['processed_size'] += file_stat.st_size
+                # Обновляем прогресс
+                print_progress(current_volume_letter, progress_counter['processed_files'], progress_counter['processed_size'])
                 if should_stop():
                     return
             except (OSError, PermissionError) as e:
-                print(f"Error accessing file {file_path}: {e}")
+                print(f"\nError accessing file {file_path}: {e}") # Сообщение на новой строке
+                # Прогресс уже обновлен до ошибки
 
         for subdir_name in subdirs_in_dir:
             subdir_abs_path = os.path.join(current_path, subdir_name)
-            scan_single_volume_recursive(db_conn, volume_id, subdir_abs_path, root_drive_path, progress_counter)
+            scan_single_volume_recursive(db_conn, volume_id, subdir_abs_path, root_drive_path, progress_counter, current_volume_letter)
             if should_stop():
                 return
 
         mark_directory_as_indexed(db_conn, dir_id, time.time())
-        progress_counter['processed_dirs'] += 1
+        # Прогресс по файлам/размеру обновляется внутри цикла по файлам
+        # Прогресс по директориям не отображается отдельно, только файлы и размер
 
     else:
-        print(f"Skipping already indexed directory: {relative_path}")
+        # Не печатаем пропуск, чтобы не засорять вывод
+        # print(f"Skipping already indexed directory: {relative_path}")
+        pass
 
 def scan_single_volume(db_conn: sqlite3.Connection, volume_info: VolumeInfo, progress_counter):
     volume_id = create_or_update_volume(db_conn, volume_info)
     root_path = volume_info.drive_letter + "\\"
-    scan_single_volume_recursive(db_conn, volume_id, root_path, root_path, progress_counter)
+    scan_single_volume_recursive(db_conn, volume_id, root_path, root_drive_path=root_path, progress_counter=progress_counter, current_volume_letter=volume_info.drive_letter)
 
 def format_bytes(bytes_value: int) -> str:
     bytes_value_f = float(bytes_value)
@@ -250,10 +257,10 @@ def format_bytes(bytes_value: int) -> str:
         bytes_value_f /= 1024
     return f"{bytes_value_f:.2f} PB" # Should not happen for typical disks
 
-def print_progress(current_files, current_size, current_dirs):
-    """Prints the current progress in terms of processed files and size."""
+def print_progress(current_volume_letter: str, current_files: int, current_size: int):
+    """Prints the current progress in terms of processed files and size on the same line."""
     size_str = format_bytes(current_size)
-    print(f"\rIndexed: {current_files} files, {size_str}", end='', flush=True)
+    print(f"\rScanning volume: {current_volume_letter}, Indexed: {current_files} files, {size_str}", end='', flush=True)
 
 def scan_and_index_volumes(db_path: str, target_drive_letters: List[str]):
     """Main function to scan and index specified volumes."""
@@ -275,15 +282,23 @@ def scan_and_index_volumes(db_path: str, target_drive_letters: List[str]):
     signal.signal(signal.SIGINT, signal_handler)
 
     for vol_info in target_volumes:
-        print(f"\nScanning volume: {vol_info.drive_letter} ({vol_info.label})")
+        print(f"Scanning volume: {vol_info.drive_letter} ({vol_info.label})")
+        # Сбрасываем счётчики для каждого нового тома, если нужно отслеживать по-томно
+        # progress_counter = {'processed_files': 0, 'processed_size': 0, 'processed_dirs': 0}
         scan_single_volume(db_conn, vol_info, progress_counter)
         if should_stop():
             break
-        print_progress(progress_counter['processed_files'], progress_counter['processed_size'], progress_counter['processed_dirs'])
+        # Прогресс обновляется внутри цикла, не нужно дублировать вручную в конце тома
+        # Убираем принудительный перевод строки после завершения тома, если не было остановки
+        # print_progress(vol_info.drive_letter, progress_counter['processed_files'], progress_counter['processed_size'])
 
     db_conn.commit()
     db_conn.close()
-    print("\nIndexing completed or stopped.")
+    
+    if stop_event:
+        print("\nIndexing stopped by user request.")
+    else:
+        print("\nIndexing completed successfully.")
 
 
 if __name__ == "__main__":
