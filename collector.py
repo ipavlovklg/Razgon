@@ -4,7 +4,6 @@ import time
 import signal
 from datetime import datetime
 from typing import Optional, List
-import logging
 
 # Import get_volumes and VolumeInfo from the external module
 from get_volumes import get_volumes, VolumeInfo
@@ -25,7 +24,6 @@ def stop_requested():
     global stop_event
     stop_event = True
 
-# --- DB Initialization ---
 def init_db_schema(db_path: str):
     """
     Creates the database file (or opens an existing one) and checks/creates/migrates its schema.
@@ -111,6 +109,10 @@ def apply_migration_v1_to_v2(cursor):
         );
     """)
 
+def to_iso(timestamp: float|None) -> str|None:
+    """Конвертируем timestamp в строку ISO 8601."""
+    return datetime.fromtimestamp(timestamp).isoformat() if timestamp else None
+
 # --- DB Functions for Functionality 1 ---
 def get_volume_by_guid(db_conn, device_guid: str) -> Optional[int]:
     """Fetches the volume ID by its GUID."""
@@ -120,7 +122,6 @@ def get_volume_by_guid(db_conn, device_guid: str) -> Optional[int]:
 
 def create_or_update_volume(db_conn, volume_info: VolumeInfo) -> int:
     """Creates or updates a volume record. Returns the volume ID."""
-    # Используем курсор для выполнения запроса
     cursor = db_conn.cursor()
     
     volume_id = get_volume_by_guid(db_conn, volume_info.device_id)
@@ -135,7 +136,6 @@ def create_or_update_volume(db_conn, volume_info: VolumeInfo) -> int:
             "INSERT INTO volumes (device_guid, drive_letter, label, filesystem) VALUES (?, ?, ?, ?)",
             (volume_info.device_id, volume_info.drive_letter, volume_info.label, volume_info.fs)
         )
-        # Возвращаем lastrowid от курсора, а не от соединения
         return cursor.lastrowid
 
 
@@ -148,27 +148,27 @@ def is_directory_fully_indexed(db_conn, volume_id: int, relative_path: str) -> b
     row = cursor.fetchone()
     return row is not None and row[0] is not None
 
-def upsert_directory_record(db_conn, volume_id: int, relative_path: str, stat_result, indexed_at: Optional[float]) -> int:
+def upsert_directory_record(db_conn, volume_id: int, relative_path: str, stat_result: os.stat_result, indexed_at: Optional[float]) -> int:
     """
     Inserts or updates a directory record. Returns the directory ID.
     """
-    # Используем курсор
     cursor = db_conn.cursor()
     
     existing_cursor = db_conn.execute("SELECT id FROM directories WHERE volume_id = ? AND relative_path = ?", (volume_id, relative_path))
     existing_row = existing_cursor.fetchone()
     existing_id = existing_row[0] if existing_row else None
 
+    indexed_at_str = to_iso(indexed_at)
     if existing_id:
         db_conn.execute(
             "UPDATE directories SET created_at=?, modified_at=?, indexed_at=? WHERE id=?",
-            (datetime.fromtimestamp(stat_result.st_ctime), datetime.fromtimestamp(stat_result.st_mtime), indexed_at, existing_id)
+            (to_iso(stat_result.st_birthtime), to_iso(stat_result.st_mtime), indexed_at_str, existing_id)
         )
         return existing_id
     else:
         cursor.execute( # <- cursor, а не db_conn
             "INSERT INTO directories (volume_id, relative_path, created_at, modified_at, indexed_at) VALUES (?, ?, ?, ?, ?)",
-            (volume_id, relative_path, datetime.fromtimestamp(stat_result.st_ctime), datetime.fromtimestamp(stat_result.st_mtime), indexed_at)
+            (volume_id, relative_path, to_iso(stat_result.st_birthtime), to_iso(stat_result.st_mtime), indexed_at_str)
         )
         # <- cursor, а не db_conn
         return cursor.lastrowid 
@@ -176,16 +176,19 @@ def upsert_directory_record(db_conn, volume_id: int, relative_path: str, stat_re
 
 def mark_directory_as_indexed(db_conn, dir_id: int, timestamp: float):
     """Marks a directory as fully indexed by setting its indexed_at timestamp."""
+    # Конвертируем timestamp в строку ISO 8601
+    indexed_at_str = to_iso(timestamp)
     db_conn.execute(
         "UPDATE directories SET indexed_at = ? WHERE id = ?",
-        (datetime.fromtimestamp(timestamp), dir_id)
+        (indexed_at_str, dir_id)
     )
 
 def insert_file_record(db_conn, dir_id: int, filename: str, stat_result):
     """Inserts a file record into the database."""
+    # Конвертируем timestamp в строку ISO 8601
     db_conn.execute(
         "INSERT OR IGNORE INTO files (directory_id, filename, size_bytes, created_at, modified_at) VALUES (?, ?, ?, ?, ?)",
-        (dir_id, filename, stat_result.st_size, datetime.fromtimestamp(stat_result.st_ctime), datetime.fromtimestamp(stat_result.st_mtime))
+        (dir_id, filename, stat_result.st_size, to_iso(stat_result.st_ctime), to_iso(stat_result.st_mtime))
     )
 
 # --- Recursive Scanning Logic ---
