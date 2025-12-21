@@ -1,4 +1,6 @@
 from win32com.client import GetObject
+from console import clear
+
 
 class VolumeInfo:
     """Information about a volume."""
@@ -26,10 +28,10 @@ def get_volumes() -> list[VolumeInfo]:
     for vol in volumes:
         device_id = vol.DeviceID or ""
         if device_id.startswith("\\\\?\\Volume{") and device_id.endswith("}\\"):
-            device_id = device_id[10:-1]
+            device_id = device_id[10:-1] # {00000000-0000-0000-0000-600632000000}
 
         item = VolumeInfo(
-            vol.DriveLetter, 
+            vol.DriveLetter.rstrip(":"), 
             device_id, 
             (vol.Label or "").strip(), 
             (vol.FileSystem or "").strip()
@@ -40,6 +42,7 @@ def get_volumes() -> list[VolumeInfo]:
 
 
 if __name__ == "__main__":
+    clear()
     items = get_volumes()
     for volumeInfo in items:
         print(f"Буква: {volumeInfo.letter}")
